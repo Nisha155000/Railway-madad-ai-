@@ -1,7 +1,9 @@
 import os
 import shutil
 import uuid
+import random
 from typing import List, Optional
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
@@ -11,7 +13,7 @@ from ..core.database import get_db
 from ..core.security import get_current_user
 from ..models.complaint import Complaint, ComplaintHistory, ComplaintStatus, ImageMetadata
 from ..models.user import User, UserRole
-from ..schemas.complaint import ComplaintOut, ComplaintUpdate
+from ..schemas.complaint import ComplaintOut, ComplaintUpdate, VerifyComplaintRequest, VerifyComplaintResponse
 from ..services.ai_service import (
     compute_phash,
     run_ai_pipeline,
@@ -23,6 +25,17 @@ router = APIRouter()
 
 
 # ── helpers ───────────────────────────────────────────────────
+
+def _generate_verification_id(db: Session) -> str:
+    """Generate unique Complaint Verification ID (RM-YYYY-XXXXXX)."""
+    import datetime as dt
+    year = dt.datetime.now().year
+    while True:
+        random_num = random.randint(100000, 999999)
+        verification_id = f"RM-{year}-{random_num}"
+        if not db.query(Complaint).filter(Complaint.verification_id == verification_id).first():
+            return verification_id
+
 
 def _save_image(file: UploadFile) -> tuple[str, bytes]:
     """Persist upload to disk, return (url_path, raw_bytes)."""
@@ -88,6 +101,9 @@ async def submit_complaint(
     # Run AI pipeline
     ai = await run_ai_pipeline(complaint_text, image_bytes, _existing_hashes(db))
 
+    # Generate unique verification ID
+    verification_id = _generate_verification_id(db)
+
     # Persist complaint
     complaint = Complaint(
         user_id=current_user.id,
@@ -106,12 +122,13 @@ async def submit_complaint(
         image_verified=ai.image_verified,
         is_duplicate=ai.is_duplicate,
         manual_review=ai.manual_review,
-        status=ComplaintStatus.Pending,
+        status=ComplaintStatus.Open,
+        verification_id=verification_id,
     )
     db.add(complaint)
     db.flush()  # get complaint.id before history insert
 
-    _add_history(db, complaint, ComplaintStatus.Pending, updated_by="AI System")
+    _add_history(db, complaint, ComplaintStatus.Open, updated_by="AI System")
 
     # Persist image metadata
     if image_bytes:
@@ -135,6 +152,62 @@ async def submit_complaint(
     db.commit()
     db.refresh(complaint)
     return complaint
+
+
+# ── POST /complaints/verify ──────────────────────────────────
+
+@router.post("/verify", response_model=VerifyComplaintResponse)
+def verify_and_close_complaint(
+    body: VerifyComplaintRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Verify complaint using Verification ID and close if valid."""
+    if current_user.role != UserRole.staff:
+        raise HTTPException(status_code=403, detail="Only department staff can verify complaints")
+    
+    complaint = db.query(Complaint).filter(Complaint.id == body.complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    if complaint.department != current_user.department:
+        raise HTTPException(status_code=403, detail="Can only verify complaints assigned to your department")
+    
+    if complaint.status != ComplaintStatus.AwaitingPassengerVerification:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Complaint is not awaiting verification. Current status: {complaint.status}"
+        )
+    
+    # Verify the ID
+    if complaint.verification_id.strip().upper() != body.verification_id.strip().upper():
+        return VerifyComplaintResponse(
+            success=False,
+            message="Invalid Verification ID. Complaint cannot be closed.",
+            complaint_id=complaint.id,
+            status=complaint.status,
+            closed_at=complaint.closed_at
+        )
+    
+    # ID matches - close the complaint
+    _add_history(db, complaint, ComplaintStatus.Closed,
+                 updated_by=current_user.name,
+                 notes=f"Verified and closed. {body.remarks or ''}")
+    complaint.status = ComplaintStatus.Closed
+    complaint.closed_at = datetime.utcnow()
+    complaint.verified_by_worker = True
+    complaint.remarks = body.remarks or complaint.remarks
+    
+    db.commit()
+    db.refresh(complaint)
+    
+    return VerifyComplaintResponse(
+        success=True,
+        message="Complaint successfully verified and closed.",
+        complaint_id=complaint.id,
+        status=complaint.status,
+        closed_at=complaint.closed_at
+    )
 
 
 # ── GET /complaints ───────────────────────────────────────────
@@ -252,3 +325,90 @@ def delete_complaint(
             os.remove(path)
     db.delete(complaint)
     db.commit()
+
+
+# ── POST /complaints/{id}/mark-resolved ──────────────────────
+
+@router.post("/{complaint_id}/mark-resolved", response_model=ComplaintOut)
+def mark_complaint_resolved(
+    complaint_id: int,
+    remarks: str = Query(""),
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(get_current_user),
+):
+    """Mark complaint as resolved by department staff."""
+    if current_user.role != UserRole.staff:
+        raise HTTPException(status_code=403, detail="Only department staff can mark as resolved")
+    
+    complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    if complaint.department != current_user.department:
+        raise HTTPException(status_code=403, detail="Can only manage complaints assigned to your department")
+    
+    # Update status to Awaiting Passenger Verification
+    _add_history(db, complaint, ComplaintStatus.AwaitingPassengerVerification,
+                 updated_by=current_user.name, notes=remarks or "Marked as resolved, awaiting passenger verification")
+    complaint.status = ComplaintStatus.AwaitingPassengerVerification
+    complaint.remarks = remarks or complaint.remarks
+    
+    db.commit()
+    db.refresh(complaint)
+    return complaint
+
+
+# ── POST /complaints/verify ──────────────────────────────────
+
+@router.post("/verify", response_model=VerifyComplaintResponse)
+def verify_and_close_complaint(
+    body: VerifyComplaintRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Verify complaint using Verification ID and close if valid."""
+    if current_user.role != UserRole.staff:
+        raise HTTPException(status_code=403, detail="Only department staff can verify complaints")
+    
+    complaint = db.query(Complaint).filter(Complaint.id == body.complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    if complaint.department != current_user.department:
+        raise HTTPException(status_code=403, detail="Can only verify complaints assigned to your department")
+    
+    if complaint.status != ComplaintStatus.AwaitingPassengerVerification:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Complaint is not awaiting verification. Current status: {complaint.status}"
+        )
+    
+    # Verify the ID
+    if complaint.verification_id.strip().upper() != body.verification_id.strip().upper():
+        return VerifyComplaintResponse(
+            success=False,
+            message="Invalid Verification ID. Complaint cannot be closed.",
+            complaint_id=complaint.id,
+            status=complaint.status,
+            closed_at=complaint.closed_at
+        )
+    
+    # ID matches - close the complaint
+    _add_history(db, complaint, ComplaintStatus.Closed,
+                 updated_by=current_user.name,
+                 notes=f"Verified and closed. {body.remarks or ''}")
+    complaint.status = ComplaintStatus.Closed
+    complaint.closed_at = datetime.utcnow()
+    complaint.verified_by_worker = True
+    complaint.remarks = body.remarks or complaint.remarks
+    
+    db.commit()
+    db.refresh(complaint)
+    
+    return VerifyComplaintResponse(
+        success=True,
+        message="Complaint successfully verified and closed.",
+        complaint_id=complaint.id,
+        status=complaint.status,
+        closed_at=complaint.closed_at
+    )

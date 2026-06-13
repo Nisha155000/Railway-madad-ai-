@@ -54,6 +54,15 @@ def seed_demo_data():
 
         if not db.query(Complaint).first():
             passenger = db.query(User).filter(User.role == UserRole.passenger).first()
+            
+            # Helper to generate verification IDs
+            def gen_verification_id():
+                import random
+                import datetime as dt
+                year = dt.datetime.now().year
+                random_num = random.randint(100000, 999999)
+                return f"RM-{year}-{random_num}"
+            
             samples = [
                 Complaint(
                     user_id=passenger.id,
@@ -71,7 +80,8 @@ def seed_demo_data():
                     image_verified=True,
                     is_duplicate=False,
                     manual_review=False,
-                    status=ComplaintStatus.Pending,
+                    status=ComplaintStatus.Open,
+                    verification_id=gen_verification_id(),
                 ),
                 Complaint(
                     user_id=passenger.id,
@@ -90,6 +100,7 @@ def seed_demo_data():
                     is_duplicate=False,
                     manual_review=False,
                     status=ComplaintStatus.InProgress,
+                    verification_id=gen_verification_id(),
                 ),
                 Complaint(
                     user_id=passenger.id,
@@ -107,7 +118,8 @@ def seed_demo_data():
                     image_verified=True,
                     is_duplicate=False,
                     manual_review=False,
-                    status=ComplaintStatus.Pending,
+                    status=ComplaintStatus.Open,
+                    verification_id=gen_verification_id(),
                 ),
                 Complaint(
                     user_id=passenger.id,
@@ -125,7 +137,8 @@ def seed_demo_data():
                     image_verified=True,
                     is_duplicate=False,
                     manual_review=False,
-                    status=ComplaintStatus.Pending,
+                    status=ComplaintStatus.Open,
+                    verification_id=gen_verification_id(),
                 ),
                 Complaint(
                     user_id=passenger.id,
@@ -144,6 +157,7 @@ def seed_demo_data():
                     is_duplicate=False,
                     manual_review=True,
                     status=ComplaintStatus.InProgress,
+                    verification_id=gen_verification_id(),
                 ),
             ]
             db.add_all(samples)

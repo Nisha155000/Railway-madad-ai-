@@ -50,8 +50,21 @@ class ComplaintOut(BaseModel):
     category: Optional[ComplaintCategory]; priority: Optional[ComplaintPriority]
     department: Optional[str]; confidence_score: Optional[int]; image_verification_status: Optional[str]
     image_verified: bool; is_duplicate: bool; manual_review: bool; status: ComplaintStatus; remarks: Optional[str] = None; created_at: datetime
+    verification_id: str; closed_at: Optional[datetime] = None; verified_by_worker: bool = False
     history: List[HistoryOut] = []; image_metadata: Optional[ImageMetaOut] = None
     model_config = {"from_attributes": True}
+
+class VerifyComplaintRequest(BaseModel):
+    complaint_id: int
+    verification_id: str
+    remarks: Optional[str] = None
+
+class VerifyComplaintResponse(BaseModel):
+    success: bool
+    message: str
+    complaint_id: int
+    status: ComplaintStatus
+    closed_at: Optional[datetime] = None
 
 class DashboardStats(BaseModel):
     total_complaints: int; pending_complaints: int; resolved_complaints: int

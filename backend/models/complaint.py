@@ -18,9 +18,10 @@ class ComplaintPriority(str, enum.Enum):
     LOW    = "LOW"
 
 class ComplaintStatus(str, enum.Enum):
-    Pending    = "Pending"
-    InProgress = "In Progress"
-    Resolved   = "Resolved"
+    Open                           = "Open"
+    InProgress                     = "In Progress"
+    AwaitingPassengerVerification  = "Awaiting Passenger Verification"
+    Closed                         = "Closed"
 
 class Complaint(Base):
     __tablename__ = "complaints"
@@ -42,11 +43,14 @@ class Complaint(Base):
     image_verified   = Column(Boolean, default=False)
     is_duplicate     = Column(Boolean, default=False)
     manual_review    = Column(Boolean, default=False)
-    status           = Column(PgEnum(ComplaintStatus, name="complaint_status"), nullable=False, default=ComplaintStatus.Pending)
+    status           = Column(PgEnum(ComplaintStatus, name="complaint_status"), nullable=False, default=ComplaintStatus.Open)
     remarks          = Column(Text, nullable=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     resolved_at      = Column(DateTime(timezone=True), nullable=True)
+    verification_id  = Column(String(50), unique=True, nullable=False, index=True)
+    closed_at        = Column(DateTime(timezone=True), nullable=True)
+    verified_by_worker = Column(Boolean, default=False)
     user             = relationship("User", back_populates="complaints")
     history          = relationship("ComplaintHistory", back_populates="complaint", cascade="all, delete")
     image_metadata   = relationship("ImageMetadata", back_populates="complaint", uselist=False, cascade="all, delete")
