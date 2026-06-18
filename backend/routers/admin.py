@@ -19,7 +19,7 @@ def dashboard_stats(
     _user: User    = Depends(require_admin),
 ):
     total    = db.query(Complaint).count()
-    resolved = db.query(Complaint).filter(Complaint.status == "Resolved").count()
+    resolved = db.query(Complaint).filter(Complaint.status == "Closed").count()
     pending  = total - resolved
     high     = db.query(Complaint).filter(Complaint.priority == "HIGH").count()
     manual   = db.query(Complaint).filter(Complaint.manual_review.is_(True)).count()
@@ -64,7 +64,7 @@ def dashboard_analytics(
     for dept in depts:
         base  = [item for item in complaints if item.department == dept]
         total = len(base)
-        res   = sum(1 for item in base if str(item.status.value if hasattr(item.status, "value") else item.status) == "Resolved")
+        res   = sum(1 for item in base if str(item.status.value if hasattr(item.status, "value") else item.status) == "Closed")
         high  = sum(1 for item in base if str(item.priority.value if hasattr(item.priority, "value") else item.priority) == "HIGH")
         dept_stats.append(DepartmentStat(department=dept, total=total, resolved=res, high=high))
 
