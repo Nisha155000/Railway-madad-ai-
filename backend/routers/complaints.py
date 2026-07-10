@@ -49,6 +49,17 @@ def _save_image(file: UploadFile) -> tuple[str, bytes]:
     return f"/uploads/{filename}", raw
 
 
+def _save_audio(file: UploadFile) -> str:
+    """Persist audio upload to disk and return its public URL."""
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
+    filename = f"{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(settings.UPLOAD_DIR, filename)
+    with open(dest, "wb") as handle:
+        shutil.copyfileobj(file.file, handle)
+    return f"/uploads/{filename}"
+
+
 def _existing_hashes(db: Session) -> list[str]:
     rows = db.query(ImageMetadata.phash).filter(ImageMetadata.phash.isnot(None)).all()
     return [r.phash for r in rows]
@@ -88,6 +99,7 @@ async def submit_complaint(
     complaint_text:  str        = Form(...),
     journey_date:    Optional[str] = Form(None),
     image:           Optional[UploadFile] = File(None),
+    audio:           Optional[UploadFile] = File(None),
     db:              Session    = Depends(get_db),
     current_user:    User       = Depends(get_current_user),
 ):
@@ -97,6 +109,12 @@ async def submit_complaint(
         if image.content_type not in settings.ALLOWED_IMAGE_TYPES:
             raise HTTPException(status_code=400, detail="Only JPEG/PNG/WEBP images allowed")
         image_url, image_bytes = _save_image(image)
+
+    audio_url = None
+    if audio and audio.filename:
+        if audio.content_type not in settings.ALLOWED_AUDIO_TYPES:
+            raise HTTPException(status_code=400, detail="Only MP3/WAV/WEBM/OGG audio files allowed")
+        audio_url = _save_audio(audio)
 
     # Run AI pipeline
     ai = await run_ai_pipeline(complaint_text, image_bytes, _existing_hashes(db))
@@ -114,6 +132,7 @@ async def submit_complaint(
         coach_number=coach_number or "-",
         complaint_text=complaint_text,
         image_url=image_url,
+        audio_url=audio_url,
         category=ai.category,
         priority=ai.priority,
         department=ai.department,
@@ -183,7 +202,7 @@ def verify_and_close_complaint(
     if complaint.verification_id.strip().upper() != body.verification_id.strip().upper():
         return VerifyComplaintResponse(
             success=False,
-            message="Invalid Verification ID. Complaint cannot be closed.",
+            message="Verification code is wrong. Complaint cannot be closed.",
             complaint_id=complaint.id,
             status=complaint.status,
             closed_at=complaint.closed_at
