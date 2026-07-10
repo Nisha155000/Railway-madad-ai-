@@ -35,6 +35,7 @@ class Complaint(Base):
     journey_date     = Column(Date, nullable=True)
     complaint_text   = Column(Text, nullable=False)
     image_url        = Column(String(500), nullable=True)
+    audio_url        = Column(String(500), nullable=True)
     category         = Column(PgEnum(ComplaintCategory, name="complaint_category"), nullable=True)
     priority         = Column(PgEnum(ComplaintPriority, name="complaint_priority"), nullable=True)
     department       = Column(String(100), nullable=True)

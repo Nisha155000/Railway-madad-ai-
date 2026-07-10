@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from .routers import auth, complaints, admin, department
 from .core.database import engine, Base, SessionLocal
 from .core.security import hash_password
@@ -10,6 +12,16 @@ from .models.user import User, UserRole
 from .models.complaint import Complaint, ComplaintCategory, ComplaintPriority, ComplaintStatus
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_audio_column():
+    with engine.begin() as connection:
+        columns = {row[1] for row in connection.execute(text("PRAGMA table_info(complaints)")).fetchall()}
+        if "audio_url" not in columns:
+            connection.execute(text("ALTER TABLE complaints ADD COLUMN audio_url VARCHAR(500)"))
+
+
+ensure_audio_column()
 
 app = FastAPI(title="Rail Madad AI", description="AI-Powered Railway Complaint Management System", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000","http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -36,17 +48,11 @@ def seed_demo_data():
 
         for demo_user in demo_users:
             user = db.query(User).filter(User.email == demo_user["email"]).first()
-            password_hash = hash_password(demo_user["password"])
-            if user:
-                user.name = demo_user["name"]
-                user.password_hash = password_hash
-                user.role = demo_user["role"]
-                user.department = demo_user["department"]
-            else:
+            if not user:
                 db.add(User(
                     name=demo_user["name"],
                     email=demo_user["email"],
-                    password_hash=password_hash,
+                    password_hash=hash_password(demo_user["password"]),
                     role=demo_user["role"],
                     department=demo_user["department"],
                 ))
@@ -162,6 +168,8 @@ def seed_demo_data():
             ]
             db.add_all(samples)
             db.commit()
+    except OperationalError:
+        db.rollback()
     finally:
         db.close()
 

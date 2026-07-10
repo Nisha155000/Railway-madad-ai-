@@ -46,7 +46,7 @@ class ImageMetaOut(BaseModel):
 
 class ComplaintOut(BaseModel):
     id: int; complaint_id: str; passenger_name: str; passenger_email: str; pnr_number: str
-    train_number: str; coach_number: str; complaint_text: str; image_url: Optional[str]
+    train_number: str; coach_number: str; complaint_text: str; image_url: Optional[str]; audio_url: Optional[str]
     category: Optional[ComplaintCategory]; priority: Optional[ComplaintPriority]
     department: Optional[str]; confidence_score: Optional[int]; image_verification_status: Optional[str]
     image_verified: bool; is_duplicate: bool; manual_review: bool; status: ComplaintStatus; remarks: Optional[str] = None; created_at: datetime
